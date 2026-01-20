@@ -1,0 +1,17 @@
+age,department,interest,book_id
+20,Engineering,SciFi,B001
+21,Engineering,SciFi,B006
+22,Engineering,SciFi,B007
+19,Engineering,Tech,B006
+23,Engineering,Physics,B005
+20,Arts,History,B002
+22,Arts,History,B004
+21,Arts,History,B008
+19,Arts,SciFi,B003
+25,Science,Physics,B005
+20,Science,Physics,B009
+22,Science,History,B004
+20,Engineering,SciFi,B001
+21,Engineering,SciFi,B007
+22,Arts,History,B002
+19,Arts,History,B008
