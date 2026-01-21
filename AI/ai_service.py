@@ -1,9 +1,15 @@
 import json
+import os
+from dotenv import load_dotenv
 import google.generativeai as genai
 
 # --- CONFIGURATION ---
+load_dotenv()
 # Paste your key inside the quotes
-API_KEY = "AIzaSyBglrChYLdRbCzbj1mQ6w0sQ5izLBya18Y"
+API_KEY = os.getenv("GEMINI_API_KEY")
+
+if not API_KEY:
+    print("❌ ERROR: API Key not found! Make sure you created the .env file.")
 
 class LibraryAI:
     def __init__(self):

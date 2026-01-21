@@ -20,6 +20,18 @@ users_db = {
     "999": {"name": "Admin", "role": "admin", "dept": "Staff", "interest": "Tech"}
 }
 
+book_rfid_map = {
+    "901": "B001", # Scanning card 901 = Dune
+    "902": "B002",
+    "903": "B003",
+    "904": "B004",
+    "905": "B005",
+    "906": "B006", # The Martian
+    "907": "B007",
+    "908": "B008",
+    "909": "B009"
+}
+
 # --- MQTT FUNCTIONS ---
 def on_connect(client, userdata, flags, rc, properties=None):
     print(f"✅ SERVER ONLINE. Connected to {BROKER}")
@@ -76,18 +88,26 @@ def on_message(client, userdata, msg):
         # --- 3. BORROW / RETURN ACTIONS ---
         elif action in ["borrow", "return"]:
             username = payload.get("user")
-            book_id = payload.get("book_id")
+            scanned_rfid = payload.get("rfid_id") # The card they just scanned
             
-            # In a real app, you would update the SQL database here.
-            # For now, we just acknowledge it.
-            status_msg = "Borrowed successfully! Due in 7 days." if action == "borrow" else "Returned. Thank you!"
+            # 1. Convert Physical Card ID to Book ID
+            book_id = book_rfid_map.get(scanned_rfid)
             
-            print(f"[ACTION] {username} performed {action} on {book_id}")
+            if book_id:
+                # Success: We found the book
+                # In a real app, check if book is already borrowed here
+                status_msg = f"Successfully {action}ed book: {book_id}"
+                msg_type = "action_confirm"
+            else:
+                # Failure: They scanned a random card or a user card
+                status_msg = f"Error: Scanned card {scanned_rfid} is not a valid book."
+                msg_type = "error"
+
+            print(f"[ACTION] {username} tried to {action} card {scanned_rfid} -> Result: {status_msg}")
             
             response = {
-                "status": "success",
-                "type": "action_confirm",
-                "action": action,
+                "status": "success" if book_id else "error",
+                "type": msg_type,
                 "message": status_msg
             }
             client.publish(TOPIC_DISPLAY, json.dumps(response))
