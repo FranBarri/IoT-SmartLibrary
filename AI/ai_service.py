@@ -1,11 +1,10 @@
 import json
 import os
+import requests
 from dotenv import load_dotenv
-import google.generativeai as genai
 
 # --- CONFIGURATION ---
 load_dotenv()
-# Paste your key inside the quotes
 API_KEY = os.getenv("GEMINI_API_KEY")
 
 if not API_KEY:
@@ -13,10 +12,9 @@ if not API_KEY:
 
 class LibraryAI:
     def __init__(self):
-        genai.configure(api_key=API_KEY)
-        
-        # USE THIS MODEL - It is the standard free-tier version
-        self.model = genai.GenerativeModel('gemini-flash-latest')
+        # We don't need google.generativeai anymore!
+        # We just need the URL for the REST API.
+        self.api_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={API_KEY}"
         
         # Simple Database
         self.catalog = [
@@ -33,35 +31,50 @@ class LibraryAI:
         self.catalog_str = json.dumps(self.catalog)
 
     def get_recommendations(self, user_text):
-        print(f"✨ Asking Gemini: '{user_text}'...")
+        print(f"✨ Asking Gemini (via HTTP): '{user_text}'...")
 
         try:
-            # --- THE "SIMPLE" PROMPT ---
-            # We explicitly tell it to be short and dumb it down.
-            prompt = f"""
-            You are a Library System.
-            DATABASE: {self.catalog_str}
-            USER INPUT: "{user_text}"
-            
-            TASK:
-            1. Pick the ONE best book ID.
-            2. Write a reason that is SHORT (max 10 words) and SIMPLE.
-            3. Return strictly valid JSON.
-            
-            JSON FORMAT:
-            {{
-                "id": "Bxxx",
-                "reason": "Short simple reason here."
-            }}
-            """
+            # --- CONSTRUCT RAW JSON PAYLOAD ---
+            payload = {
+                "contents": [{
+                    "parts": [{
+                        "text": f"""
+                        You are a Library System.
+                        DATABASE: {self.catalog_str}
+                        USER INPUT: "{user_text}"
+                        
+                        TASK:
+                        1. Pick the ONE best book ID.
+                        2. Write a reason that is SHORT (max 10 words) and SIMPLE.
+                        3. Return strictly valid JSON.
+                        
+                        JSON FORMAT:
+                        {{
+                            "id": "Bxxx",
+                            "reason": "Short simple reason here."
+                        }}
+                        """
+                    }]
+                }]
+            }
 
-            response = self.model.generate_content(prompt)
+            # --- SEND REQUEST ---
+            response = requests.post(self.api_url, json=payload, headers={'Content-Type': 'application/json'})
             
-            # Clean up response
-            clean_text = response.text.replace("```json", "").replace("```", "").strip()
+            # Check for HTTP errors
+            if response.status_code != 200:
+                print(f"❌ API Error: {response.text}")
+                return self._get_fallback()
+
+            # --- PARSE RESPONSE ---
+            data = response.json()
+            # Navigate the Google JSON structure to find the text
+            raw_text = data['candidates'][0]['content']['parts'][0]['text']
+            
+            # Clean up Markdown if present
+            clean_text = raw_text.replace("```json", "").replace("```", "").strip()
             result = json.loads(clean_text)
 
-            # --- NEW: PRINT THE ANSWER TO TERMINAL ---
             print(f"🤖 GEMINI ANSWER: {result['reason']}") 
             print(f"📚 RECOMMENDED: {result['id']}")
             
@@ -73,8 +86,7 @@ class LibraryAI:
             return [full_book]
 
         except Exception as e:
-            # If we hit a rate limit (429) again, fallback gracefully
-            print(f"❌ Error: {e}")
+            print(f"❌ Connection Error: {e}")
             return self._get_fallback()
 
     def _get_book_by_id(self, target_id):
@@ -86,7 +98,7 @@ class LibraryAI:
         return [{
             "title": "Sapiens", 
             "desc": "History of humankind.", 
-            "reason": "AI is busy, but this is a classic.", 
+            "reason": "AI is offline, but this is a classic.", 
             "confidence": "Offline"
         }]
 
