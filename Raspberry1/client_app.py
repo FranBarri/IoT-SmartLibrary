@@ -5,7 +5,7 @@ import paho.mqtt.client as mqtt
 
 # IMPORT YOUR MODULES
 from hardware import RFIDReader
-from ui_views import LoginView, DashboardView, AdminView
+from ui_views import *
 
 # --- CONFIG ---
 BROKER = "localhost" 
@@ -23,6 +23,8 @@ class SmartLibraryApp(tk.Tk):
         # STATE
         self.current_user = ""
         self.current_book_id = ""
+        self.pending_action_mode = None
+        self.scan_popup = None 
 
         # 2. INIT UI
         self.container = tk.Frame(self)
@@ -87,26 +89,77 @@ class SmartLibraryApp(tk.Tk):
     # --- LOGIC ACTIONS ---
     def handle_rfid_scan(self, card_id):
         print(f"DEBUG: Scanned {card_id}")
-        # Send raw scan to server. Server decides if it's login or borrow.
-        self.publish({"action": "scan", "id": card_id})
+
+        if self.scan_popup:
+            self.scan_popup.destroy()
+            self.scan_popup = None
+
+        if self.pending_action_mode:
+            # Send Borrow/Return
+            self.publish({
+                "action": self.pending_action_mode,
+                "user": self.current_user,
+                "book_id": card_id 
+            })
+            self.pending_action_mode = None
+        else:
+            # Normal Scan
+            self.publish({"action": "scan", "id": card_id})
 
     def simulate_scan(self, card_id):
         # Called by buttons on LoginView
         self.handle_rfid_scan(card_id)
 
+    def prepare_action(self, action_type):
+        """Called when user clicks Borrow or Return button"""
+        self.pending_action_mode = action_type
+
+        # PASS 'self' AS THE CONTROLLER
+        self.scan_popup = ScanPopup(self, action_type, self.cancel_action, self) 
+
+        msg = f"Please SCAN BOOK to {action_type.upper()}..."
+        
+        # Show message on current view (Background status)
+        if self.current_role == "admin":
+            self.frames["AdminView"].set_action_status(msg)
+        else:
+            self.frames["DashboardView"].set_action_status(msg)
+
+    def cancel_action(self):
+        """Called if user clicks CANCEL in the popup"""
+        self.pending_action_mode = None
+        if self.scan_popup:
+            self.scan_popup.destroy()
+            self.scan_popup = None
+
+    def request_logs(self):
+        self.publish({"action": "get_logs"})
+
     def send_chat(self, text):
-        self.frames["DashboardView"].add_chat_msg("👤 You", text, "user_msg")
+        if self.current_role == "admin":
+            current_view = self.frames["AdminView"]
+        else:
+            current_view = self.frames["DashboardView"]
+
+        current_view.add_chat_msg("You", text, "user_msg")
         self.publish({"action": "chat", "user": self.current_user, "text": text})
 
-    def send_action(self, action_type):
-        if not self.current_book_id:
-            messagebox.showwarning("Warning", "No book selected!")
-            return
-        self.publish({"action": action_type, "user": self.current_user, "book_id": self.current_book_id})
-
     def logout(self):
+        if self.current_user:
+            self.publish({
+                "action": "logout", 
+                "user": self.current_user
+            })
+
+        if "DashboardView" in self.frames:
+            self.frames["DashboardView"].clear_chat()
+
+        if "AdminView" in self.frames:
+            self.frames["AdminView"].clear_chat()
+            
         self.current_user = ""
         self.current_book_id = ""
+        self.current_role = "client"
         self.show_frame("LoginView")
 
     def publish(self, msg_dict):
@@ -123,6 +176,10 @@ class SmartLibraryApp(tk.Tk):
             messagebox.showerror("Error", data['message'])
             return
 
+        if data.get('type') == 'log_data':
+            self.frames["AdminView"].update_logs(data['logs'])
+            return
+
         if data.get('type') == 'action_confirm':
             messagebox.showinfo("Success", data['message'])
             return
@@ -130,21 +187,22 @@ class SmartLibraryApp(tk.Tk):
         if data['type'] in ['login', 'chat_response']:
             self.current_user = data['user']
             book = data['book']
-            self.current_book_id = book['id']
 
-            # Update Dashboard
-            dash = self.frames["DashboardView"]
-            dash.update_book(book)
+            if data['type'] == 'login':
+                self.current_role = data.get('role', 'client')
+                target_view = "AdminView" if self.current_role == "admin" else "DashboardView"
+                self.frames[target_view].update_user(self.current_user)
+                if self.current_role == "admin":
+                    self.request_logs()
+                self.show_frame(target_view)
+            else:
+                target_view = "AdminView" if self.current_role == "admin" else "DashboardView"
+
+            view = self.frames[target_view]
+            view.update_book(book)
             
             if data['type'] == 'chat_response':
-                dash.add_chat_msg("🤖 AI", book.get('reason', ''), "ai_msg")
-            
-            if data['type'] == 'login':
-                dash.update_user(self.current_user)
-                if data.get('role') == 'admin':
-                    self.show_frame("AdminView")
-                else:
-                    self.show_frame("DashboardView")
+                view.add_chat_msg("AI", book.get('reason', ''), "ai_msg")
 
 if __name__ == "__main__":
     app = SmartLibraryApp()
