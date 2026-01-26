@@ -9,7 +9,7 @@ from common import config
 class LibraryAI:
     def __init__(self, db_conn):
         self.db = db_conn
-        self.api_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={config.GEMINI_KEY}"
+        self.api_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={config.GEMINI_KEY}"
 
     def get_dynamic_catalog(self):
         """Fetches real books from SQLite to give context to the AI"""
@@ -21,10 +21,17 @@ class LibraryAI:
             return "[]"
 
     def get_recommendations(self, user_text):
-        catalog_str = self.get_dynamic_catalog()
+        # DEBUG: Check API Key Status
+        if not config.GEMINI_KEY:
+            print("DEBUG: API Key is MISSING or Empty!")
+        else:
+            print(f"DEBUG: API Key loaded (Length: {len(config.GEMINI_KEY)})")
+
         print(f"Asking Gemini about: '{user_text}'...")
 
         try:
+            catalog_str = self.get_dynamic_catalog()
+            
             payload = {
                 "contents": [{
                     "parts": [{
@@ -47,14 +54,15 @@ class LibraryAI:
             response = requests.post(self.api_url, json=payload, headers={'Content-Type': 'application/json'})
             
             if response.status_code != 200:
+                print(f"API ERROR {response.status_code}: {response.text}")
                 return self._get_fallback()
 
-            # Parse (Simplistic parsing for brevity)
+            # Parse Response
             raw = response.json()['candidates'][0]['content']['parts'][0]['text']
             clean = raw.replace("```json", "").replace("```", "").strip()
             result = json.loads(clean)
             
-            # Fetch full details from DB to ensure accuracy
+            # Fetch from DB
             book = self.db.execute("SELECT * FROM books WHERE book_id=?", (result['id'],)).fetchone()
             if book:
                 return [{
@@ -66,8 +74,8 @@ class LibraryAI:
             return self._get_fallback()
 
         except Exception as e:
-            print(f"AI Error: {e}")
+            print(f"CRITICAL EXCEPTION: {e}")
             return self._get_fallback()
-
+        
     def _get_fallback(self):
         return [{"title": "System Offline", "desc": "Check API Key", "reason": "AI unavailable."}]
